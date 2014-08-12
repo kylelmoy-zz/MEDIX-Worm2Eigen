@@ -10,6 +10,8 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 
+import Jama.Matrix;
+
 /**
  * An array-backed data transfer object for conveying worm data.
  * @author Kyle Moy
@@ -238,6 +240,21 @@ public class DataFile {
 	}
 	
 	/**
+	 * @return a 2D array representation of the backing data array.
+	 */
+	public double[][] array() {
+		int w = caseLength;
+		int h = caseCount;
+		double[][] output = new double[h][w];
+		for (int y = 0; y < h; y++) {	
+			for (int x = 0; x < w; x++) {
+				output[y][x] = data[(y * w) + x];
+			}
+		}
+		return output;
+	}
+	
+	/**
 	 * @return The length of this <code>Data File</code>
 	 */
 	public int length() {
@@ -272,16 +289,7 @@ public class DataFile {
 	public static void main (String[] args) {
 		double[] d = {1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12,13,13,13,14,14,14};
 		DataFile input = new DataFile(d,3);
-		
-		System.out.println(input.equals(input));
-		DataFile[] split = input.split(4);
-		DataFile test = split[0];
-		for (int i = 1; i < 4; i ++) {
-			test = test.join(split[i]);
-		}
-		System.out.println(input.equals(test));
-		System.out.println(test.length() + " == " + input.length());
-		System.out.println(test.caseCount() + " == " + input.caseCount());
-		System.out.println(test.caseLength() + " == " + input.caseLength());
+		Matrix m = new Matrix(input.array());
+		m.print(input.caseLength(), input.caseCount());
 	}
 }

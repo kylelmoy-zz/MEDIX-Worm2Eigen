@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Scanner;
 
+import org.la4j.matrix.dense.Basic2DMatrix;
+
 import Jama.Matrix;
 
 public class Wrm2Eig {
@@ -47,16 +49,20 @@ public class Wrm2Eig {
 		int t = Runtime.getRuntime().availableProcessors();
 		int d = 49;
 		int n = d - 1;
+		int c = 48;
 		//Usage:
 		//	wrm2eig input output
 		// List of methods
+		
+		
 		//Parse text skeleton points
 		System.out.println("Parsing input...");
 		long time = System.currentTimeMillis();
-		DataFile input = parseInputText(new File("data/skeleton.txt"), d);
-		System.out.println("\tComplete: " + (System.currentTimeMillis() - time) + "ms");
+		DataFile input = parseInputLoops(new File("data/skeleton.txt"), d);
 		//DataFile input = new DataFile(new File("data/input.dat"));
-		//input.writeToFile(new File("data/input.dat"));
+		input.writeToFile(new File("data/input.dat"));
+		System.out.println("\tComplete: " + (System.currentTimeMillis() - time) + "ms");
+		
 		
 		//Calculate Vectors
 		System.out.println("Calculating vectors...");
@@ -89,7 +95,7 @@ public class Wrm2Eig {
 			vectors = vectors.join(compute[i].getResult());
 		}
 		//DataFile vectors = calculateVectors(input);
-		//vectors.writeToFile(new File("data/vectors.dat"));
+		vectors.writeToFile(new File("data/vectors.dat"));
 		//DataFile vectors = new DataFile(new File("data/vectors.dat"));
 		System.out.println("\tComplete: " + (System.currentTimeMillis() - time) + "ms");
 
@@ -97,12 +103,101 @@ public class Wrm2Eig {
 		System.out.println("Calculating principal components...");
 		time = System.currentTimeMillis();
 		DataFile components = calculatePrincipalComponents(vectors);
-		//components.writeToFile(new File("data/components.dat"));
+		//DataFile components = new DataFile(new File("data/components.dat"));
+		components.writeToFile(new File("data/components.dat"));
 		System.out.println("\tComplete: " + (System.currentTimeMillis() - time) + "ms");
-		//Project
+		
+		//Calculate amplitudes
+		for (int i = 1; i <= c; i ++) {
+			System.out.println(i);
+			System.out.println("Calculating amplitudes...");
+			DataFile amp = calculateAmplitudes(vectors,components,i);
+			//amp.writeToFile(new File("data/amplitudes.dat"));
+			
+			
+			//Project
+			System.out.println("Calculating projection...");
+			DataFile projected = projectData(amp, components, i);
+			projected.writeToFile(new File("data/n48/" + i + ".dat"));
+		}
+		//Done
 		System.out.println("Done!");
 	}
-	
+	private static DataFile parseInputLoops(File file, int d) throws FileNotFoundException {
+		ArrayList<Integer> data = new ArrayList<Integer>();
+		Scanner input = new Scanner(file);
+		Scanner loops = new Scanner(new File("data/isLoop.txt"));
+		int caseCount = 0;
+		int pointCount = 0;
+		System.out.println("\tReading text...");
+		while (input.hasNext()) {
+			boolean isLoop = loops.nextInt() == 1 ? true : false;
+			String caseLine = input.nextLine();
+			if (!isLoop) continue;
+			int skeletonPoints = 0;
+			for (char c : caseLine.toCharArray()) {
+				if (c == '|')
+					skeletonPoints++;
+			}
+			//Ignore skeleton entries with too few points
+			if (skeletonPoints < 100) {
+				continue;
+			}
+			caseLine = caseLine.replaceAll("\\||;", " ");
+			Scanner caseInput = new Scanner(caseLine);
+			data.add(skeletonPoints);
+			pointCount ++;
+			for (int i = 0; i < skeletonPoints; i++) {
+				data.add(caseInput.nextInt());
+				data.add(caseInput.nextInt());
+				pointCount += 2;
+			}
+			caseInput.close();
+			caseCount ++;
+			if (caseCount % 1000 == 0)
+				System.out.println("\t\t" + caseCount);
+		}
+		input.close();
+		System.out.println("\tNumber of cases: " + caseCount);
+		System.out.println("\tNumber of points: " + pointCount);
+
+		DataFile output = new DataFile((caseCount * d * 2), caseCount);
+		//Downsample
+		System.out.println("\tDown sampling skeleton to " + d + " points...");
+		int offset = 0;
+		while (offset < data.size()){
+			int length = (int)data.get(offset++);
+			double[] x = new double[length];
+			double[] y = new double[length];
+			int index = offset;
+			for (int i = 0; i < length; i++) {
+				//int index = offset + (i * 2); //Optimization, ho!
+				x[i] = data.get(index);
+				y[i] = data.get(index + 1);
+				index += 2;
+			}
+			offset += length * 2;
+			
+			//Down Sample to d
+			double s = (double)length/(double)(d-1);
+			double[] dX = new double[d];
+			double[] dY = new double[d];
+			double c = 0;
+			for (int i = 0; i < (d-1); i++) {
+				dX[i] = x[(int)c];
+				dY[i] = y[(int)c];
+				c += s;
+			}
+			//Always include tail
+			dX[d - 1] = x[length-1];
+			dY[d - 1] = y[length-1];
+			for (int i = 0; i < d; i++) {
+				output.add(dX[i]);
+				output.add(dY[i]);
+			}
+		}
+		return output;
+	}
 	/**
 	 * Loads skeleton points from a text file in the format:
 	 * 		|x1,1;y1,1|x1,2;y1,2|...|x1,n;y1,n
@@ -263,21 +358,52 @@ public class Wrm2Eig {
 		return new DataFile(principalComponents,n);
 	}
 	
+	/**
+	 * Transforms the vector data with some number of components.
+	 * @param vectors The vector data
+	 * @param components The components (in order of greatest eigenvalue)
+	 * @param numComponents How many components to transform with
+	 * @return The transformed data (amplitudes)
+	 */
 	private static DataFile calculateAmplitudes(DataFile vectors, DataFile components, int numComponents) {
-		Matrix pc = new Matrix(components.array());
-		Matrix data = new Matrix(vectors.array());
-		Matrix feature = pc.getMatrix(0, numComponents, 0, pc.getColumnDimension());
-		Matrix transdata = feature.times(data);
-		double[][] twoDim = transdata.getArray();
-		int w = twoDim[0].length;
-		int h = twoDim.length;
-		double[] oneDim = new double[h * w];
-		for (int i = 0; i < twoDim.length; i++) {
-			for (int j = 0; j < twoDim[0].length; j++) {
-				oneDim[(i * h) + j] = twoDim[i][j];
+		//Jama is such a worthless library
+		Basic2DMatrix pc = new Basic2DMatrix(components.array());
+		org.la4j.matrix.Matrix data = (new Basic2DMatrix(vectors.array())).transpose();
+		org.la4j.matrix.Matrix feature = pc.sliceTopLeft(numComponents, pc.columns());
+		//System.out.println(feature);
+		//System.out.println(feature.rows() + "x" + feature.columns() + " * " + data.rows() + "x" + data.columns());
+		org.la4j.matrix.Matrix transdata = feature.multiply(data);
+		double[] matrix = new double[transdata.rows() * transdata.columns()];
+		int c = 0;
+		for (int j = 0; j < transdata.rows(); j++) {
+			for (int i = 0; i < transdata.columns(); i++) {
+				matrix[c++] = transdata.get(j, i);
 			}
 		}
-		return new DataFile(oneDim,w);
+		return new DataFile(matrix,transdata.columns());
+	}
+	
+	/**
+	 * Projects vector data using amplitudes and components.
+	 * @param transformed The transformed vector data (amplitudes)
+	 * @param components The components
+	 * @param numComponents The number of components to use
+	 * @return The transformed data
+	 */
+	private static DataFile projectData(DataFile transformed, DataFile components, int numComponents) {
+		Basic2DMatrix pc = new Basic2DMatrix(components.array());
+		org.la4j.matrix.Matrix feature = pc.sliceTopLeft(numComponents, pc.columns());
+		org.la4j.matrix.Matrix trans = new Basic2DMatrix(transformed.array());
+		org.la4j.matrix.Matrix projected = feature.transpose().multiply(trans);
+		projected = projected.transpose();
+		double[] matrix = new double[projected.rows() * projected.columns()];
+		int c = 0;
+		for (int j = 0; j < projected.rows(); j++) {
+			for (int i = 0; i < projected.columns(); i++) {
+				matrix[c++] = projected.get(j, i);
+			}
+		}
+		return new DataFile(matrix,projected.rows());
 	}
 	
 	//HELPER METHODS
